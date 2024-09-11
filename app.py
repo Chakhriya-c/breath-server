@@ -4,21 +4,12 @@ import tensorflow as tf
 import numpy as np
 import librosa
 import os
-import logging
 
 app = Flask(__name__)
 CORS(app)  # To handle CORS issues, if needed
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
 # Load the model
-try:
-    model = tf.keras.models.load_model('model.h5')
-    logger.info('Model loaded successfully.')
-except Exception as e:
-    logger.error(f'Error loading model: {e}')
+model = tf.keras.models.load_model('model.h5')
 
 def extract_features(y, sr):
     mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
@@ -66,28 +57,24 @@ def process_audio(audio_path):
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    logger.info('Prediction endpoint called.')
+    print('Prediction endpoint called.')
     if 'audio' not in request.files:
-        logger.error('No audio file provided')
+        print('No audio file provided')
         return jsonify({'error': 'No audio file provided'}), 400
 
     file = request.files['audio']
     if file.filename == '':
-        logger.error('No selected file')
+        print('No selected file')
         return jsonify({'error': 'No selected file'}), 400
 
     file_path = os.path.join('uploads', file.filename)
     file.save(file_path)
-    logger.info(f'File saved at {file_path}')
+    print(f'File saved at {file_path}')
 
     try:
         y, sr = process_audio(file_path)
         predicted_labels = predict_periods(model, y, sr)
         periods, durations = get_periods_and_durations(predicted_labels)
-
-        # Clean up file
-        os.remove(file_path)
-        logger.info(f'File removed from {file_path}')
 
         # Convert periods and durations to readable format
         results = []
@@ -95,9 +82,17 @@ def predict():
             label = 'Inhale' if period == 0 else 'Exhale'
             results.append({'period': i + 1, 'label': label, 'duration': duration})
 
+        # Clean up file
+        os.remove(file_path)
+        print(f'File removed from {file_path}')
+
+        # Print results
+        print('Prediction results:', results)
+
+        # Return results
         return jsonify({'results': results})
     except Exception as e:
-        logger.error(f'Error during prediction: {e}')
+        print(f'Error during prediction: {e}')
         os.remove(file_path)  # Clean up file in case of error
         return jsonify({'error': str(e)}), 500
 
