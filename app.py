@@ -8,8 +8,12 @@ import os
 app = Flask(__name__)
 CORS(app)  # To handle CORS issues, if needed
 
-# Load the model
-model = tf.keras.models.load_model('model.h5')
+# Load the TFLite model
+interpreter = tf.lite.Interpreter(model_path='model.tflite')
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 def extract_features(y, sr):
     mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
@@ -21,11 +25,18 @@ def segment_audio(y, sr, segment_length=2, hop_length=1):
         end = start + int(segment_length * sr)
         segment = y[start:end]
         frames.append(extract_features(segment, sr))
-    return np.array(frames)
+    return np.array(frames, dtype=np.float32)
 
-def predict_periods(model, y, sr, segment_length=2, hop_length=1):
+def predict_periods(interpreter, y, sr, segment_length=2, hop_length=1):
     frames = segment_audio(y, sr, segment_length, hop_length)
-    predictions = model.predict(frames)
+    
+    predictions = []
+    for frame in frames:
+        interpreter.set_tensor(input_details[0]['index'], [frame])
+        interpreter.invoke()
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        predictions.append(output_data)
+    
     predicted_labels = np.argmax(predictions, axis=1)
     return predicted_labels
 
@@ -73,7 +84,7 @@ def predict():
 
     try:
         y, sr = process_audio(file_path)
-        predicted_labels = predict_periods(model, y, sr)
+        predicted_labels = predict_periods(interpreter, y, sr)
         periods, durations = get_periods_and_durations(predicted_labels)
 
         # Convert periods and durations to readable format
