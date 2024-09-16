@@ -1,12 +1,21 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import tensorflow as tf
 import numpy as np
 import librosa
 import os
+import shutil
 
-app = Flask(__name__)
-CORS(app)  # To handle CORS issues, if needed
+app = FastAPI()
+
+# Allow CORS (Cross-Origin Resource Sharing)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust based on your needs
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Load the .h5 model
 model = tf.keras.models.load_model('model.h5')
@@ -59,23 +68,20 @@ def process_audio(audio_path):
     y, sr = librosa.load(audio_path, sr=None)
     return y, sr
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    print('Prediction endpoint called.')
-    if 'audio' not in request.files:
-        print('No audio file provided')
-        return jsonify({'error': 'No audio file provided'}), 400
+@app.post("/predict/")
+async def predict(audio: UploadFile = File(...)):
+    # Check for audio file
+    if not audio.filename.endswith(".wav"):
+        raise HTTPException(status_code=400, detail="Invalid file type. Only .wav files are accepted.")
 
-    file = request.files['audio']
-    if file.filename == '':
-        print('No selected file')
-        return jsonify({'error': 'No selected file'}), 400
+    file_path = f"uploads/{audio.filename}"
 
-    file_path = os.path.join('uploads', file.filename)
-    file.save(file_path)
-    print(f'File saved at {file_path}')
+    # Save the uploaded file
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(audio.file, buffer)
 
     try:
+        # Process the audio file
         y, sr = process_audio(file_path)
         predicted_labels = predict_periods(model, y, sr)
         periods, durations = get_periods_and_durations(predicted_labels)
@@ -88,17 +94,9 @@ def predict():
 
         # Clean up file
         os.remove(file_path)
-        print(f'File removed from {file_path}')
 
-        # Print results
-        print('Prediction results:', results)
+        return {"results": results}
 
-        # Return results
-        return jsonify({'results': results})
     except Exception as e:
-        print(f'Error during prediction: {e}')
         os.remove(file_path)  # Clean up file in case of error
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+        raise HTTPException(status_code=500, detail=f"Error during prediction: {str(e)}")
